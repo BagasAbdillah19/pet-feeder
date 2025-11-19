@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Automatic Pet Feeder Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase v8.6.8 (Namespaced SDKs) -->
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-database.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
+        
+        html, body {
+            height: 100%; width: 100%; overflow: hidden;
+        }
+        body {
+            background-color: #111827;
+            font-family: 'Poppins', sans-serif;
+            display: flex; justify-content: center; align-items: center;
+        }
+        body.dashboard-active { display: block; }
+        #dashboard { display: none; }
+        body.dashboard-active #dashboard {
+            display: flex; flex-direction: column; width: 100%; height: 100%;
+        }
+        main {
+            flex-grow: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .dashboard-card {
+            background-color: rgba(31, 41, 55, 0.7); backdrop-filter: blur(10px);
+            border-radius: 1.5rem; 
+            padding: 0.75rem 1.25rem;
+            border: 1px solid rgba(55, 65, 81, 1);
+            flex-shrink: 0;
+        }
+        
+        .switch { position: relative; display: inline-block; width: 74px; height: 38px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ef4444; transition: .4s; border-radius: 38px; }
+        .slider:before { position: absolute; content: ""; height: 30px; width: 30px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #22c55e; }
+        input:checked + .slider:before { transform: translateX(36px); }
+    </style>
+</head>
+<body class="text-gray-200">
+
+    <!-- Login Form -->
+    <div id="loginForm" class="w-full max-w-sm p-4">
+        <div class="bg-gray-900/50 backdrop-blur-md p-8 rounded-2xl shadow-lg text-center border border-blue-700/50">
+            <img src="https://cdn-icons-png.flaticon.com/512/616/616430.png" alt="Cat Feeder Icon" class="w-20 mb-4 mx-auto">
+            <h2 class="text-2xl font-bold text-blue-400 mb-6">Pet Feeder System Access</h2>
+            <!-- Input dibiarkan kosong untuk diisi manual -->
+            <input type="email" id="login-email" placeholder="Email" value="" class="w-full bg-gray-700 text-white p-3 rounded-lg mb-4 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="password" id="password" placeholder="Password" value="" class="w-full bg-gray-700 text-white p-3 rounded-lg mb-4 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button id="loginBtn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition">Login</button>
+            <p id="loginError" class="text-red-500 mt-4 h-4"></p>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard" class="p-4">
+        <header class="text-center mb-2 mt-1 flex-shrink-0">
+            <h1 class="text-2xl font-bold text-blue-300">🐱 Automatic Cat Feeder</h1>
+        </header>
+
+        <main class="w-full max-w-md mx-auto">
+             <div class="flex flex-col gap-2">
+                 <!-- Status Card -->
+                 <div class="dashboard-card text-center">
+                     <h3 class="text-lg font-semibold text-blue-300 mb-1">SYSTEM STATUS</h3>
+                     <p id="status-text" class="text-5xl font-bold transition-colors duration-500">...</p>
+                     <p id="schedule-info-text" class="text-sm text-yellow-400 h-5"></p>
+                 </div>
+                 
+                 <!-- Manual Card -->
+                 <div class="dashboard-card text-center">
+                     <h3 class="text-lg font-semibold text-blue-300 mb-2">MANUAL OVERRIDE</h3>
+                     <p class="text-sm text-gray-400 mb-1">Toggle untuk mengontrol pengumpan secara manual.</p>
+                     <div class="flex justify-center items-center">
+                         <label class="switch">
+                             <input type="checkbox" id="manual-toggle">
+                             <span class="slider"></span>
+                         </label>
+                     </div>
+                 </div>
+
+                 <!-- Schedule Slots -->
+                 <div id="schedule-slots" class="flex flex-col gap-2">
+                     <!-- Schedule 1 -->
+                     <div id="jadwal1-card" class="dashboard-card">
+                         <h3 class="text-lg font-semibold text-blue-300 mb-2">SCHEDULE 1</h3>
+                         <div class="flex justify-between items-center mb-2">
+                            <span class="text-sm text-gray-400">Aktifkan Jadwal:</span>
+                            <label class="switch" style="width: 50px; height: 26px;">
+                                <input type="checkbox" id="toggle-jadwal1">
+                                <span class="slider" style="border-radius: 26px;"></span>
+                            </label>
+                        </div>
+                         <div class="flex space-x-2">
+                            <div class="flex-1">
+                                <label class="text-sm text-gray-400">Waktu Mulai</label>
+                                <input type="time" id="waktu-mulai1" class="w-full bg-gray-700 text-white p-2 rounded-lg mt-1 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base">
+                            </div>
+                            <div class="flex-1">
+                                <label class="text-sm text-gray-400">Durasi (Menit)</label>
+                                <input type="number" id="durasi1" value="15" min="1" max="60" class="w-full bg-gray-700 text-white p-2 rounded-lg mt-1 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base">
+                            </div>
+                        </div>
+                        <button id="btnSetJadwal1" class="w-full mt-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 transition font-semibold text-base">SET SCHEDULE 1</button>
+                     </div>
+
+                     <!-- Schedule 2 -->
+                     <div id="jadwal2-card" class="dashboard-card">
+                        <h3 class="text-lg font-semibold text-blue-300 mb-2">SCHEDULE 2</h3>
+                        <div class="flex justify-between items-center mb-2">
+                           <span class="text-sm text-gray-400">Aktifkan Jadwal:</span>
+                           <label class="switch" style="width: 50px; height: 26px;">
+                               <input type="checkbox" id="toggle-jadwal2">
+                               <span class="slider" style="border-radius: 26px;"></span>
+                           </label>
+                       </div>
+                        <div class="flex space-x-2">
+                           <div class="flex-1">
+                               <label class="text-sm text-gray-400">Waktu Mulai</label>
+                               <input type="time" id="waktu-mulai2" class="w-full bg-gray-700 text-white p-2 rounded-lg mt-1 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base">
+                           </div>
+                           <div class="flex-1">
+                               <label class="text-sm text-gray-400">Durasi (Menit)</label>
+                               <input type="number" id="durasi2" value="15" min="1" max="60" class="w-full bg-gray-700 text-white p-2 rounded-lg mt-1 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base">
+                           </div>
+                       </div>
+                       <button id="btnSetJadwal2" class="w-full mt-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 transition font-semibold text-base">SET SCHEDULE 2</button>
+                    </div>
+
+                    <!-- Schedule 3 -->
+                    <div id="jadwal3-card" class="dashboard-card">
+                        <h3 class="text-lg font-semibold text-blue-300 mb-2">SCHEDULE 3</h3>
+                        <div class="flex justify-between items-center mb-2">
+                           <span class="text-sm text-gray-400">Aktifkan Jadwal:</span>
+                           <label class="switch" style="width: 50px; height: 26px;">
+                               <input type="checkbox" id="toggle-jadwal3">
+                               <span class="slider" style="border-radius: 26px;"></span>
+                           </label>
+                       </div>
+                        <div class="flex space-x-2">
+                           <div class="flex-1">
+                               <label class="text-sm text-gray-400">Waktu Mulai</label>
+                               <input type="time" id="waktu-mulai3" class="w-full bg-gray-700 text-white p-2 rounded-lg mt-1 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base">
+                           </div>
+                           <div class="flex-1">
+                               <label class="text-sm text-gray-400">Durasi (Menit)</label>
+                               <input type="number" id="durasi3" value="15" min="1" max="60" class="w-full bg-gray-700 text-white p-2 rounded-lg mt-1 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-base">
+                           </div>
+                       </div>
+                       <button id="btnSetJadwal3" class="w-full mt-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 transition font-semibold text-base">SET SCHEDULE 3</button>
+                    </div>
+                 </div>
+             </div>
+        </main>
+            
+        <footer class="text-center mt-2 flex-shrink-0">
+            <button id="logoutBtn" class="py-2 px-4 rounded-lg bg-gray-600 hover:bg-gray-500 transition font-semibold">Logout</button>
+        </footer>
+    </div>
+
+    <script>
+        // *******************************************************
+        // *** FIREBASE CONFIGURATION (Disediakan oleh Pengguna) ***
+        const firebaseConfig = {
+            apiKey: "AIzaSyAMK3EFNVRp_gkt70-_0tzhGH2RTiXVG-s",
+            authDomain: "pet-feeder-74325.firebaseapp.com",
+            databaseURL: "https://pet-feeder-74325-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "pet-feeder-74325",
+            storageBucket: "pet-feeder-74325.firebasestorage.app",
+            messagingSenderId: "342182098442",
+            appId: "1:342182098442:web:f3d1d71ec264879c1451f3"
+        };
+        // *******************************************************
+        
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.database();
+        const feederRef = db.ref('petfeeder'); // Mengacu ke node utama 'petfeeder'
+
+        const loginForm = document.getElementById('loginForm');
+        const dashboard = document.getElementById('dashboard');
+        const loginBtn = document.getElementById('loginBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const manualToggle = document.getElementById('manual-toggle');
+        const scheduleInfoText = document.getElementById('schedule-info-text');
+
+        // Definisi 3 slot jadwal
+        let allSchedules = [
+            { id: 1, ref: feederRef.child('jadwal1'), timeInput: 'waktu-mulai1', durationInput: 'durasi1', toggleInput: 'toggle-jadwal1', setButton: 'btnSetJadwal1', data: null, isRunning: false },
+            { id: 2, ref: feederRef.child('jadwal2'), timeInput: 'waktu-mulai2', durationInput: 'durasi2', toggleInput: 'toggle-jadwal2', setButton: 'btnSetJadwal2', data: null, isRunning: false },
+            { id: 3, ref: feederRef.child('jadwal3'), timeInput: 'waktu-mulai3', durationInput: 'durasi3', toggleInput: 'toggle-jadwal3', setButton: 'btnSetJadwal3', data: null, isRunning: false }
+        ];
+
+        // --- Login/Logout Handling ---
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                loginForm.style.display = 'none';
+                document.body.classList.add('dashboard-active');
+                dashboard.style.display = 'flex';
+                initDashboardListeners();
+            } else {
+                loginForm.style.display = 'block';
+                document.body.classList.remove('dashboard-active');
+                dashboard.style.display = 'none';
+                if (scheduleCheckInterval) clearInterval(scheduleCheckInterval);
+            }
+        });
+
+        loginBtn.addEventListener('click', () => {
+            const email = document.getElementById("login-email").value;
+            const password = document.getElementById("password").value;
+            // PENTING: Anda harus memiliki user/password yang terdaftar di Firebase Authentication
+            auth.signInWithEmailAndPassword(email, password)
+                .catch(error => document.getElementById('loginError').textContent = "Email atau Password Salah.");
+        });
+        
+        logoutBtn.addEventListener('click', () => auth.signOut());
+
+        // --- Firebase Update Functions ---
+        function updateSystemState(status, relayState, manualModeState) {
+            feederRef.update({
+                status: status,
+                relay1: relayState,
+                manualMode: manualModeState
+            });
+        }
+
+        function updateStatusUI(status, manualMode) {
+            const statusText = document.getElementById('status-text');
+            
+            // Sinkronisasi manual toggle
+            manualToggle.removeEventListener('change', manualToggleHandler);
+            manualToggle.checked = manualMode;
+            manualToggle.addEventListener('change', manualToggleHandler);
+
+            statusText.textContent = status || "OFFLINE";
+            
+            let colorClass = 'text-gray-500';
+            if (status === "ON" || status === "RUNNING") colorClass = 'text-green-500';
+            if (status === "OFF") colorClass = 'text-red-500';
+            if (status === "IDLE") colorClass = 'text-yellow-400';
+
+            statusText.className = `text-5xl font-bold transition-colors duration-500 ${colorClass}`;
+        }
+
+        // Handler untuk manual toggle
+        function manualToggleHandler() {
+            const isChecked = manualToggle.checked;
+            
+            if (isChecked) {
+                // Manual ON
+                updateSystemState('ON', true, true);
+            } else {
+                // Manual OFF
+                updateSystemState('OFF', false, false); 
+            }
+        }
+        
+        // --- Schedule Logic (Dijalankan di Web/Dashboard) ---
+        function checkAllSchedules() {
+            const now = new Date();
+            let isAnyScheduleRunning = false;
+            let nextScheduleInfo = null;
+            let nextScheduleTime = Infinity;
+
+            for (const schedule of allSchedules) {
+                if (!schedule.data || !schedule.data.aktif) continue;
+
+                const [scheduleHour, scheduleMinute] = schedule.data.jamMulai.split(':').map(Number);
+                const durationMs = (schedule.data.durasiMenit || 1) * 60 * 1000;
+                
+                const scheduleStart = new Date(now);
+                scheduleStart.setHours(scheduleHour, scheduleMinute, 0, 0);
+                const scheduleEnd = new Date(scheduleStart.getTime() + durationMs);
+                
+                const isInScheduleRange = now >= scheduleStart && now <= scheduleEnd;
+
+                if (isInScheduleRange) {
+                    // Jadwal sedang berjalan
+                    isAnyScheduleRunning = true;
+                    schedule.isRunning = true;
+                    const minutesLeft = Math.ceil((scheduleEnd - now) / 60000);
+                    scheduleInfoText.textContent = `RUNNING (Sch ${schedule.id}): ${minutesLeft} min left`;
+                } else if (now < scheduleStart) {
+                    // Jadwal akan datang
+                    schedule.isRunning = false;
+                    if (scheduleStart.getTime() < nextScheduleTime) {
+                        nextScheduleTime = scheduleStart.getTime();
+                        nextScheduleInfo = `Next: Sch ${schedule.id} at ${schedule.data.jamMulai}`;
+                    }
+                }
+            }
+
+            // Update status ke Firebase (otomatis)
+            feederRef.once('value').then(snapshot => {
+                const currentData = snapshot.val();
+                if (currentData && !currentData.manualMode) {
+                    if (isAnyScheduleRunning && currentData.status !== 'RUNNING') {
+                         // Note: Ini hanya untuk indikasi di dashboard. Aksi fisik dikontrol oleh ESP32.
+                         updateSystemState('RUNNING', true, false); 
+                    } else if (!isAnyScheduleRunning && currentData.status !== 'IDLE' && currentData.status !== 'OFF') {
+                         updateSystemState('IDLE', false, false); 
+                    }
+                }
+
+                // Update UI next schedule info jika tidak ada yang berjalan
+                if (!isAnyScheduleRunning) {
+                    scheduleInfoText.textContent = nextScheduleInfo || 'No Active Schedule.';
+                }
+            });
+        }
+        
+        // Fungsi untuk menyimpan jadwal ke Firebase
+        function setSchedule(scheduleId) {
+            const schedule = allSchedules.find(s => s.id === scheduleId);
+            const jamMulai = document.getElementById(schedule.timeInput).value;
+            const durasi = parseInt(document.getElementById(schedule.durationInput).value, 10);
+            const aktif = document.getElementById(schedule.toggleInput).checked;
+
+            if (jamMulai && durasi > 0) {
+                schedule.ref.set({ 
+                    jamMulai: jamMulai, 
+                    durasiMenit: durasi,
+                    aktif: aktif
+                })
+                .then(() => {
+                    // Mengganti alert() dengan pesan di console karena batasan lingkungan
+                    console.log(`Jadwal ${scheduleId} berhasil dikirim!`); 
+                    // Jika ada jadwal yang diaktifkan, pastikan mode manual mati
+                    if (aktif) feederRef.update({ manualMode: false }); 
+                })
+                .catch(error => console.error('Gagal menyimpan jadwal.', error));
+            } else {
+                console.warn('Harap tentukan waktu dan durasi yang valid.');
+            }
+        }
+        
+        // --- Inisialisasi Event Listeners ---
+        function initDashboardListeners() {
+            // Listener Status dan Manual Mode utama
+            feederRef.on("value", snap => {
+                const data = snap.val();
+                if (data) {
+                    updateStatusUI(data.status, data.manualMode);
+                }
+            });
+
+            // Listener untuk 3 schedule
+            allSchedules.forEach(schedule => {
+                const timeInput = document.getElementById(schedule.timeInput);
+                const durationInput = document.getElementById(schedule.durationInput);
+                const toggleInput = document.getElementById(schedule.toggleInput);
+
+                schedule.ref.on("value", snap => {
+                    const jadwal = snap.val();
+                    if (jadwal && jadwal.jamMulai) {
+                        schedule.data = jadwal;
+                        timeInput.value = jadwal.jamMulai;
+                        durationInput.value = jadwal.durasiMenit || 15;
+                        
+                        // Sinkronisasi Toggle UI
+                        toggleInput.removeEventListener('change', () => setSchedule(schedule.id));
+                        toggleInput.checked = jadwal.aktif || false;
+                        toggleInput.addEventListener('change', () => setSchedule(schedule.id));
+                        
+                    } else {
+                        schedule.data = null;
+                        timeInput.value = '';
+                        durationInput.value = 15;
+                        toggleInput.checked = false;
+                    }
+                });
+
+                // Set button handler
+                document.getElementById(schedule.setButton).addEventListener('click', () => setSchedule(schedule.id));
+                // Toggle handler
+                toggleInput.addEventListener('change', () => setSchedule(schedule.id));
+            });
+
+            // Schedule checker interval
+            if (scheduleCheckInterval) clearInterval(scheduleCheckInterval);
+            scheduleCheckInterval = setInterval(checkAllSchedules, 5000); // Cek setiap 5 detik
+        }
+    </script>
+</body>
+</html>
